@@ -2,4 +2,3 @@ streamlit
 st-gsheets-connection
 yfinance
 pandas
-pandas_ta
