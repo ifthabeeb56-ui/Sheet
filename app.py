@@ -3,24 +3,26 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import yfinance as yf
 
-# 1. Page Configuration (Professional Look)
+# 1. Page Configuration
 st.set_page_config(page_title="NSE Pro Tracker", layout="wide")
 
-# Custom CSS for Professional Look and Center Alignment
+# Custom CSS for Professional Look
 st.markdown("""
     <style>
     .main { background-color: #0e1117; }
     [data-testid="stMetricValue"] { color: #00ff41; font-family: monospace; }
-    .stDataFrame { margin: auto; }
     div[data-testid="stMetric"] { background-color: #1e2130; padding: 15px; border-radius: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. Google Sheets Connection
+# 2. Google Sheets Connection with your Link
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1rFlciVBKJT6AXmi_vJGwApicez4ZaTKQ0rrdUZVJ-aE/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
-df = conn.read(ttl="1m")
 
-# 3. Manual RSI Calculation (Replacing pandas-ta)
+# ലൊക്കേഷൻ എറർ ഒഴിവാക്കാൻ URL നേരിട്ട് നൽകുന്നു
+df = conn.read(spreadsheet=SHEET_URL, ttl="1m")
+
+# 3. Manual RSI Calculation (No pandas-ta required)
 def calculate_rsi(prices, period=14):
     delta = prices.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
@@ -39,7 +41,6 @@ def get_market_data(symbols):
                 rsi_vals = calculate_rsi(hist['Close'])
                 current_rsi = rsi_vals.iloc[-1]
                 
-                # Signal Logic
                 if current_rsi < 35: signal = "🟢 BUY"
                 elif current_rsi > 65: signal = "🔴 SELL"
                 else: signal = "⚪ HOLD"
@@ -49,14 +50,14 @@ def get_market_data(symbols):
             analysis[sym] = {"LTP": 0, "RSI": 0, "Signal": "N/A"}
     return analysis
 
-# 4. Horizontal Align Center Layout
-left_space, main_col, right_space = st.columns([1, 10, 1])
+# 4. Main UI Layout
+left, mid, right = st.columns([1, 10, 1])
 
-with main_col:
+with mid:
     st.title("📊 NSE Portfolio & RSI Tracker")
     
     if not df.empty and 'Stock' in df.columns:
-        with st.spinner('Updating Live Market Prices...'):
+        with st.spinner('Updating Live Prices...'):
             live_data = get_market_data(df['Stock'].tolist())
             
             df['LTP'] = df['Stock'].map(lambda x: live_data.get(x, {}).get('LTP', 0))
@@ -66,21 +67,20 @@ with main_col:
             df['P&L'] = (df['LTP'] - df['Buy Price']) * df['Qty']
             df['Change %'] = ((df['LTP'] - df['Buy Price']) / df['Buy Price']) * 100
 
-        # Display Metrics
+        # Metrics Row
         m1, m2, m3 = st.columns(3)
         total_pl = df['P&L'].sum()
         m1.metric("Total P&L", f"₹ {total_pl:,.0f}", f"{total_pl:,.2f}")
-        m2.metric("Stocks Count", len(df))
-        m3.metric("Market Status", "LIVE")
+        m2.metric("Active Stocks", len(df))
+        m3.metric("Status", "LIVE")
 
+        # 5. Formatted Table (Zero Decimals & Clean)
         st.subheader("Live Insights")
-        
-        # 5. Table Formatting (Removing Decimals & Aligning)
         st.dataframe(
             df.style.format({
-                "Buy Price": "₹ {:.0f}",
-                "LTP": "₹ {:.0f}",
-                "P&L": "₹ {:.0f}",
+                "Buy Price": "{:.0f}",
+                "LTP": "{:.0f}",
+                "P&L": "{:.0f}",
                 "Change %": "{:.2f}%",
                 "RSI": "{:.0f}",
                 "Qty": "{:.0f}"
@@ -89,25 +89,22 @@ with main_col:
             hide_index=True
         )
     else:
-        st.info("പോർട്ട്ഫോളിയോ കാലിയാണ്. സൈഡ്ബാറിൽ നിന്ന് സ്റ്റോക്കുകൾ ചേർക്കുക.")
+        st.info("ഷീറ്റിൽ ഡാറ്റയൊന്നും കാണുന്നില്ല. സൈഡ്ബാറിൽ നിന്ന് സ്റ്റോക്കുകൾ ചേർക്കുക.")
 
-# 6. Sidebar for Adding Stocks & Auto-Save
+# 6. Sidebar
 with st.sidebar:
-    st.header("Add New Stock")
-    with st.form("stock_entry", clear_on_submit=True):
-        new_stock = st.text_input("NSE Symbol (eg: RVNL)")
-        new_qty = st.number_input("Quantity", min_value=1, step=1)
-        new_price = st.number_input("Buy Price", min_value=0.0)
-        
-        if st.form_submit_button("Add & Save Automatically"):
-            if new_stock:
-                new_row = pd.DataFrame([{"Stock": new_stock.upper(), "Qty": new_qty, "Buy Price": new_price}])
-                updated_df = pd.concat([df, new_row], ignore_index=True)
-                
-                # Update Google Sheet
-                conn.update(data=updated_df)
-                st.success(f"{new_stock} saved successfully!")
-                st.rerun()
-
+    st.header("Settings")
     if st.button("Refresh Data"):
         st.rerun()
+    
+    st.divider()
+    with st.form("add_stock"):
+        s = st.text_input("Stock Symbol (eg: SBIN)")
+        q = st.number_input("Qty", min_value=1)
+        p = st.number_input("Buy Price", min_value=0.0)
+        if st.form_submit_button("Add to Sheet"):
+            new_row = pd.DataFrame([{"Stock": s.upper(), "Qty": q, "Buy Price": p}])
+            updated_df = pd.concat([df, new_row], ignore_index=True)
+            conn.update(spreadsheet=SHEET_URL, data=updated_df)
+            st.success("Added!")
+            st.rerun()
