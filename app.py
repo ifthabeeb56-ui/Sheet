@@ -4,7 +4,7 @@ import pandas as pd
 import yfinance as yf
 from datetime import date
 
-# 1. പേജ് കോൺഫിഗറേഷൻ
+# 1. പേജ് സെറ്റിംഗ്സ്
 st.set_page_config(page_title="NSE Pro Tracker", layout="wide")
 
 # കസ്റ്റം ഡിസൈൻ (CSS)
@@ -17,7 +17,6 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # 2. ഗൂഗിൾ ഷീറ്റ് കണക്ഷൻ
-# നിങ്ങളുടെ ഷീറ്റ് ലിങ്ക് ഇവിടെ നൽകുക
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1rFlciVBKJT6AXmi_vJGwApicez4ZaTKQ0rrdUZVJ-aE/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -25,7 +24,6 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 try:
     df = conn.read(spreadsheet=SHEET_URL, ttl="1m")
 except Exception:
-    # ഷീറ്റ് കാലിയാണെങ്കിൽ ഒരു ശൂന്യമായ DataFrame ഉണ്ടാക്കുന്നു
     df = pd.DataFrame(columns=['Date', 'Name', 'Buy pr', 'QTY'])
 
 # 3. RSI കണക്കാക്കാനുള്ള ഫംഗ്ഷൻ
@@ -62,14 +60,18 @@ st.title("📊 NSE Portfolio & RSI Tracker")
 
 if not df.empty and 'Name' in df.columns:
     with st.spinner('Updating Live Prices...'):
-        # ഷീറ്റിലെ 'Name' കോളം ഉപയോഗിച്ച് ലൈവ് ഡാറ്റ എടുക്കുന്നു
+        # --- എറർ ഒഴിവാക്കാൻ ഡാറ്റാ ടൈപ്പ് മാറ്റുന്നു (Crucial Fix) ---
+        df['Buy pr'] = pd.to_numeric(df['Buy pr'], errors='coerce')
+        df['QTY'] = pd.to_numeric(df['QTY'], errors='coerce')
+        
+        # ലൈവ് ഡാറ്റ എടുക്കുന്നു
         live_data = get_market_data(df['Name'].tolist())
         
         df['LTP'] = df['Name'].map(lambda x: live_data.get(x, {}).get('LTP', 0))
         df['RSI'] = df['Name'].map(lambda x: live_data.get(x, {}).get('RSI', 0))
         df['Signal'] = df['Name'].map(lambda x: live_data.get(x, {}).get('Signal', 'N/A'))
         
-        # ലാഭവും നഷ്ടവും കണക്കാക്കുന്നു (Buy pr, QTY എന്നിവ ഷീറ്റിലെ പേരുകളാണ്)
+        # ലാഭവും നഷ്ടവും കണക്കാക്കുന്നു
         df['P&L'] = (df['LTP'] - df['Buy pr']) * df['QTY']
         df['Change %'] = ((df['LTP'] - df['Buy pr']) / df['Buy pr']) * 100
 
@@ -78,7 +80,7 @@ if not df.empty and 'Name' in df.columns:
     total_pl = df['P&L'].sum()
     m1.metric("Total P&L", f"₹ {total_pl:,.0f}")
     m2.metric("Active Stocks", len(df))
-    m3.metric("Market Status", "LIVE")
+    m3.metric("Status", "LIVE")
 
     # ഡാറ്റാ ടേബിൾ
     st.subheader("Live Portfolio Insights")
@@ -97,7 +99,7 @@ if not df.empty and 'Name' in df.columns:
 else:
     st.info("ഷീറ്റിൽ ഡാറ്റയൊന്നും കാണുന്നില്ല. സൈഡ്ബാറിൽ നിന്ന് സ്റ്റോക്കുകൾ ചേർക്കുക.")
 
-# 5. സൈഡ്ബാർ (Settings & Add Stock)
+# 5. സൈഡ്ബാർ (Add New Stock)
 with st.sidebar:
     st.header("Settings")
     if st.button("Refresh Data"):
@@ -106,7 +108,7 @@ with st.sidebar:
     st.divider()
     st.subheader("Add New Stock")
     with st.form("add_stock"):
-        s = st.text_input("Stock Symbol (eg: TATAMOTORS)")
+        s = st.text_input("Stock Symbol (eg: RELIANCE)")
         q = st.number_input("Quantity", min_value=1)
         p = st.number_input("Buy Price", min_value=0.0)
         
@@ -114,18 +116,17 @@ with st.sidebar:
             today = date.today().strftime("%d/%m/%y")
             new_row = pd.DataFrame([{
                 "Date": today, 
-                "Name": s.upper(), 
+                "Name": s.upper().replace(".NS", ""), 
                 "Buy pr": p, 
                 "QTY": q
             }])
             
-            # പുതിയ ഡാറ്റ ചേർക്കുന്നു
             updated_df = pd.concat([df, new_row], ignore_index=True)
             
-            # ഷീറ്റിലേക്ക് സേവ് ചെയ്യുന്നു
             try:
+                # ഷീറ്റിലേക്ക് സേവ് ചെയ്യുന്നു
                 conn.update(spreadsheet=SHEET_URL, data=updated_df)
-                st.success(f"{s.upper()} വിജയകരമായി ചേർത്തു!")
+                st.success(f"{s.upper()} ചേർത്തു!")
                 st.rerun()
-            except Exception as e:
-                st.error("സേവ് ചെയ്യാൻ കഴിഞ്ഞില്ല. Service Account ക്രമീകരിച്ചിട്ടുണ്ടോ എന്ന് പരിശോധിക്കുക.")
+            except Exception:
+                st.error("സേവ് ചെയ്യാൻ കഴിഞ്ഞില്ല. Streamlit Secrets-ൽ Service Account നൽകിയിട്ടുണ്ടോ?")
