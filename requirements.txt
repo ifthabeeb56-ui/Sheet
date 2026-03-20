@@ -1,1 +1,5 @@
-pip install streamlit streamlit-gsheets yfinance pandas pandas-ta
+streamlit
+streamlit-gsheets
+yfinance
+pandas
+pandas-ta
